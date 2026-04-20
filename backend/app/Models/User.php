@@ -19,6 +19,7 @@ class User extends Authenticatable
         'password',
         'role_id',
         'loyalty_points',
+        'store_credit',
         'is_blocked',
     ];
 

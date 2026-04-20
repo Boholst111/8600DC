@@ -58,6 +58,10 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::get('/returns', [ReturnController::class, 'index']);
         Route::get('/returns/{id}', [ReturnController::class, 'show']);
         Route::put('/returns/{id}/process', [ReturnController::class, 'process']);
+
+        // Financial Ledger Management
+        Route::get('/financial-ledgers', [App\Http\Controllers\FinancialLedgerController::class, 'index']);
+        Route::post('/financial-ledgers', [App\Http\Controllers\FinancialLedgerController::class, 'store']);
     });
 
     // ── Delivery Rider ───────────────────────────────────────────

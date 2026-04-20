@@ -11,13 +11,14 @@ class ReturnRequest extends Model
 
     protected $fillable = [
         'order_id', 'user_id', 'reason', 'description',
-        'evidence_photo', 'items', 'status', 'resolution',
+        'evidence_photo', 'evidence_files', 'items', 'status', 'resolution',
         'refund_amount', 'admin_notes', 'reviewed_by',
         'reviewed_at', 'resolved_at',
     ];
 
     protected $casts = [
         'items'         => 'array',
+        'evidence_files' => 'array',
         'refund_amount' => 'decimal:2',
         'reviewed_at'   => 'datetime',
         'resolved_at'   => 'datetime',

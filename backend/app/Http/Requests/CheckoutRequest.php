@@ -24,11 +24,13 @@ class CheckoutRequest extends FormRequest
         return [
             'shipping_address' => 'required|string|max:500',
             'courier' => 'required|in:LBC,J&T,Local Rider',
-            'payment_method' => 'required|in:COD,GCash,Xendit,PayPal',
+            'payment_method' => 'required|in:COD,GCash,Xendit,PayPal,Store Credit',
             'shipping_fee' => 'required|numeric|min:0',
             
             'packaging_type' => 'nullable|string',
             'packaging_fee' => 'nullable|numeric|min:0',
+            
+            'use_store_credit' => 'nullable|boolean',
 
             'items' => 'required|array|min:1',
             'items.*.product_id' => 'required|exists:products,id',

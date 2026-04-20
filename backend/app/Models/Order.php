@@ -11,7 +11,7 @@ class Order extends Model
 
     protected $fillable = [
         'user_id', 'subtotal', 'shipping_fee', 'packaging_type', 'packaging_fee',
-        'total_amount', 'status', 'is_preorder', 'shipping_address', 'courier', 'tracking_number'
+        'total_amount', 'store_credit_used', 'balance_due', 'status', 'is_preorder', 'shipping_address', 'courier', 'tracking_number'
     ];
 
     protected $casts = [
@@ -19,6 +19,8 @@ class Order extends Model
         'shipping_fee' => 'decimal:2',
         'packaging_fee' => 'decimal:2',
         'total_amount' => 'decimal:2',
+        'store_credit_used' => 'decimal:2',
+        'balance_due' => 'decimal:2',
         'is_preorder' => 'boolean',
     ];
 
