@@ -44,6 +44,8 @@ class ProductResource extends JsonResource
                 ];
             }),
             'availability' => $this->stock > 0 ? 'In Stock' : ($this->is_preorder ? 'Pre-order' : 'Out of Stock'),
+            'average_rating' => (float) $this->reviews()->avg('rating') ?: 0,
+            'reviews_count' => $this->reviews()->count(),
         ];
     }
 }

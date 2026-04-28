@@ -9,6 +9,7 @@ use App\Models\Category;
 use App\Models\User;
 use App\Models\Delivery;
 use App\Models\Payment;
+use App\Models\Setting;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -95,12 +96,19 @@ class AdminController extends Controller
     public function updateOrderStatus(Request $request, $id): JsonResponse
     {
         $request->validate([
-            'status' => 'required|in:Pending,Processing,Settlement Required,Ready for Shipment,Shipped,Delivered,Returned,Cancelled',
+            'status' => 'required|in:Pending,Processing,Settlement Required,Ready for Shipment,Shipped,Delivered,Returned,Cancelled,Awaiting Verification',
         ]);
 
         $order = Order::findOrFail($id);
         $order->status = $request->status;
         $order->save();
+
+        // ── Pickup Notification Protocol ──
+        if ($order->delivery_type === 'pickup' && 
+            $order->status === 'Ready for Shipment' && 
+            $order->tracking_number) {
+            $this->sendPickupNotification($order);
+        }
 
         // Handle Pre-Order Arrival Notification
         if ($request->status === 'Settlement Required') {
@@ -126,9 +134,10 @@ class AdminController extends Controller
     public function updateOrder(Request $request, $id): JsonResponse
     {
         $request->validate([
-            'payment_status' => 'sometimes|string|in:Pending,Paid,Refunded,Failed',
-            'status'         => 'sometimes|string|in:Pending,Processing,Settlement Required,Ready for Shipment,Shipped,Delivered,Returned,Cancelled',
+            'payment_status' => 'sometimes|string|in:Pending,Paid,Refunded,Failed,Awaiting Verification',
+            'status'         => 'sometimes|string|in:Pending,Processing,Settlement Required,Ready for Shipment,Shipped,Delivered,Returned,Cancelled,Awaiting Verification',
             'courier'        => 'sometimes|nullable|string|max:50',
+            'tracking_number'=> 'sometimes|nullable|string|max:100',
         ]);
 
         $order = Order::findOrFail($id);
@@ -146,7 +155,18 @@ class AdminController extends Controller
             $order->status = $request->status;
         }
 
+        if ($request->filled('tracking_number')) {
+            $order->tracking_number = $request->tracking_number;
+        }
+
         $order->save();
+
+        // ── Pickup Notification Protocol ──
+        if ($order->delivery_type === 'pickup' && 
+            $order->status === 'Ready for Shipment' && 
+            $order->tracking_number) {
+            $this->sendPickupNotification($order);
+        }
 
         return response()->json(['status' => 'success', 'message' => "Order #{$id} updated.", 'data' => $order->fresh()]);
     }
@@ -342,5 +362,56 @@ class AdminController extends Controller
             'Content-Type' => 'text/csv',
             'Content-Disposition' => 'attachment; filename="8600DC-Orders-Export.csv"',
         ]);
+    }
+
+    /**
+     * ─── NOTIFICATION ENGINE ──────────────────────────────────────────────────
+     */
+    /**
+     * ─── SETTINGS MANAGEMENT ──────────────────────────────────────────────────
+     */
+    public function getSettings(): JsonResponse
+    {
+        $settings = Setting::all()->pluck('value', 'key');
+        return response()->json(['status' => 'success', 'data' => $settings]);
+    }
+
+    public function getPublicSettings(): JsonResponse
+    {
+        // Only return non-sensitive settings
+        $publicKeys = ['gcash_number', 'gcash_name', 'gcash_qr'];
+        $settings = Setting::whereIn('key', $publicKeys)->get()->pluck('value', 'key');
+        return response()->json(['status' => 'success', 'data' => $settings]);
+    }
+
+    public function updateSettings(Request $request): JsonResponse
+    {
+        $data = $request->all();
+
+        foreach ($data as $key => $value) {
+            if ($request->hasFile($key)) {
+                $file = $request->file($key);
+                $path = $file->store('settings', 'public');
+                Setting::updateOrCreate(['key' => $key], ['value' => $path]);
+            } else if (is_string($value) || is_numeric($value) || is_null($value)) {
+                Setting::updateOrCreate(['key' => $key], ['value' => $value]);
+            }
+        }
+
+        return response()->json(['status' => 'success', 'message' => 'System parameters synchronized']);
+    }
+
+    private function sendPickupNotification(Order $order)
+    {
+        $user = $order->user;
+        $tracking = $order->tracking_number;
+        
+        $message = "8600DC PROTOCOL: Hello {$user->name}, your order #{$order->id} is now READY FOR PICKUP at your chosen branch. "
+                 . "Tracking/Claim ID: {$tracking}. Please bring a valid ID. "
+                 . "Items held for 5 business days.";
+
+        // In production, integrate with Twilio/Semaphore for SMS 
+        // and Mail::to()->send() for Email.
+        \Log::channel('single')->info("NOTIFY: [SMS/EMAIL SENT] to {$user->email} | Message: {$message}");
     }
 }

@@ -150,6 +150,8 @@ class CheckoutController extends Controller
                     'store_credit_used' => $creditToApply,
                     'balance_due' => $cashPaidForOrder,
                     'status' => 'Pending',
+                    'delivery_type' => $validated['delivery_type'],
+                    'nearest_branch' => $validated['nearest_branch'] ?? null,
                     'is_preorder' => (bool) $isPreorderGroup,
                     'shipping_address' => $validated['shipping_address'],
                     'courier' => $assignedCourier,
@@ -167,11 +169,22 @@ class CheckoutController extends Controller
 
                 // 4. Record Payment (Amount = actual cash expected)
                 $paymentStatus = 'Pending';
+                $gcashProofPath = null;
+
                 if ($cashPaidForOrder <= 0) {
                     // Fully covered by store credit — no cash collection needed
                     $paymentStatus = 'Completed';
                 } elseif ($validated['payment_method'] === 'COD') {
                     $paymentStatus = 'Pending'; // Collected on delivery
+                } elseif ($validated['payment_method'] === 'GCash') {
+                    $paymentStatus = 'Awaiting Verification';
+                    // Save GCash proof screenshot
+                    if ($request->hasFile('gcash_proof')) {
+                        $gcashProofPath = $request->file('gcash_proof')->store('gcash-proofs', 'public');
+                    }
+                    if (!empty($validated['gcash_reference'])) {
+                        $transactionId = 'REF-' . strtoupper($validated['gcash_reference']);
+                    }
                 }
 
                 Payment::create([
@@ -180,6 +193,7 @@ class CheckoutController extends Controller
                     'status' => $paymentStatus,
                     'amount' => $cashPaidForOrder,
                     'transaction_id' => $transactionId,
+                    'gcash_proof' => $gcashProofPath,
                 ]);
 
                 // 5. Initialize Delivery Record
@@ -250,5 +264,13 @@ class CheckoutController extends Controller
                 'message' => $e->getMessage()
             ], 422);
         }
+    }
+
+    public function branches()
+    {
+        return response()->json([
+            'status' => 'success',
+            'data' => \App\Models\Branch::all()
+        ]);
     }
 }
