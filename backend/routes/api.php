@@ -4,26 +4,30 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ProductController;
+use App\Http\Controllers\AdminController;
+use App\Http\Controllers\CheckoutController;
+use App\Http\Controllers\DeliveryController;
+use App\Http\Controllers\ClientController;
+use App\Http\Controllers\ReturnController;
 
 // Public API endpoints
 Route::get('/products', [ProductController::class, 'index']);
 Route::get('/products/filters', [ProductController::class, 'filters']);
 Route::get('/products/{id}', [ProductController::class, 'show']);
+Route::get('/products/{id}/reviews', [App\Http\Controllers\ReviewController::class, 'index']);
+Route::get('/branches', [CheckoutController::class, 'branches']);
+Route::get('/settings', [AdminController::class, 'getPublicSettings']);
 
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
-
-use App\Http\Controllers\AdminController;
-use App\Http\Controllers\DeliveryController;
-use App\Http\Controllers\CheckoutController;
-use App\Http\Controllers\ClientController;
-use App\Http\Controllers\ReturnController;
 
 Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/user', [AuthController::class, 'user']);
     Route::put('/user/profile', [AuthController::class, 'updateProfile']);
     Route::post('/checkout', [CheckoutController::class, 'checkout']);
+    Route::post('/reviews', [App\Http\Controllers\ReviewController::class, 'store']);
+    Route::get('/products/{id}/can-review', [App\Http\Controllers\ReviewController::class, 'canReview']);
 
     // ── Admin Only ──────────────────────────────────────────────
     Route::middleware(['role:ADMIN'])->prefix('admin')->group(function () {
@@ -58,6 +62,19 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::get('/returns', [ReturnController::class, 'index']);
         Route::get('/returns/{id}', [ReturnController::class, 'show']);
         Route::put('/returns/{id}/process', [ReturnController::class, 'process']);
+
+        // Financial Ledger Management
+        Route::get('/financial-ledgers', [App\Http\Controllers\FinancialLedgerController::class, 'index']);
+        Route::post('/financial-ledgers', [App\Http\Controllers\FinancialLedgerController::class, 'store']);
+
+        // Review Management
+        Route::get('/reviews', [App\Http\Controllers\ReviewController::class, 'adminIndex']);
+        Route::put('/reviews/{id}/status', [App\Http\Controllers\ReviewController::class, 'updateStatus']);
+        Route::delete('/reviews/{id}', [App\Http\Controllers\ReviewController::class, 'destroy']);
+
+        // Settings Management
+        Route::get('/settings', [AdminController::class, 'getSettings']);
+        Route::post('/settings', [AdminController::class, 'updateSettings']);
     });
 
     // ── Delivery Rider ───────────────────────────────────────────

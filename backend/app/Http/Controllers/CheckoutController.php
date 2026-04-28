@@ -74,12 +74,22 @@ class CheckoutController extends Controller
             reset($groupedItems);
             $primaryGroup = key($groupedItems);
 
+            // Initialize Store Credit tracking
+            $remainingCredit = $user->store_credit ?? 0;
+            $totalCreditUsedInCheckout = 0;
+
             foreach ($groupedItems as $isPreorderGroup => $itemsInGroup) {
                 $subtotal = 0;
                 $processedItems = [];
 
                 foreach ($itemsInGroup as $item) {
-                    $product = Product::with('preorder')->lockForUpdate()->find($item['product_id']);
+                    $pid = $item['product_id'] ?? $item['id'];
+                    // Explicitly query via Model with shared lock for safety
+                    $product = \App\Models\Product::where('id', $pid)->lockForUpdate()->first();
+
+                    if (!$product) {
+                        throw new \Exception("Asset #{$pid} not found in inventory syndicate.");
+                    }
 
                     if (!$product->is_preorder && $product->stock < $item['quantity']) {
                         throw new \Exception("Insufficient stock for {$product->name}");
@@ -93,8 +103,8 @@ class CheckoutController extends Controller
                         $priceToCharge = $product->downpayment_amount > 0 ? $product->downpayment_amount : $product->price * 0.2;
                     } else {
                         $priceToCharge = $product->price;
-                        $product->stock -= $item['quantity'];
-                        $product->save();
+                        // Atomic query-level decrement for absolute reliability
+                        \App\Models\Product::where('id', $product->id)->decrement('stock', $item['quantity']);
                     }
 
                     $lineTotal = $priceToCharge * $item['quantity'];
@@ -112,6 +122,21 @@ class CheckoutController extends Controller
                 $currentPackagingFee = ($isPreorderGroup === $primaryGroup) ? ($validated['packaging_fee'] ?? 0) : 0;
 
                 $currentTotal = $subtotal + $currentShippingFee + $currentPackagingFee;
+                
+                // Apply Store Credit to this sub-order
+                $creditToApply = 0;
+                if ($remainingCredit > 0) {
+                    if ($remainingCredit >= $currentTotal) {
+                        $creditToApply = $currentTotal;
+                        $remainingCredit -= $currentTotal;
+                    } else {
+                        $creditToApply = $remainingCredit;
+                        $remainingCredit = 0;
+                    }
+                }
+                $totalCreditUsedInCheckout += $creditToApply;
+                $cashPaidForOrder = $currentTotal - $creditToApply;
+
                 $finalTotalAmount += $currentTotal;
 
                 // 2. Create Order Record
@@ -122,7 +147,11 @@ class CheckoutController extends Controller
                     'packaging_type' => $validated['packaging_type'] ?? null,
                     'packaging_fee' => $currentPackagingFee,
                     'total_amount' => $currentTotal,
+                    'store_credit_used' => $creditToApply,
+                    'balance_due' => $cashPaidForOrder,
                     'status' => 'Pending',
+                    'delivery_type' => $validated['delivery_type'],
+                    'nearest_branch' => $validated['nearest_branch'] ?? null,
                     'is_preorder' => (bool) $isPreorderGroup,
                     'shipping_address' => $validated['shipping_address'],
                     'courier' => $assignedCourier,
@@ -138,13 +167,33 @@ class CheckoutController extends Controller
                     ]);
                 }
 
-                // 4. Record Payment Trial for this sub-order
+                // 4. Record Payment (Amount = actual cash expected)
+                $paymentStatus = 'Pending';
+                $gcashProofPath = null;
+
+                if ($cashPaidForOrder <= 0) {
+                    // Fully covered by store credit — no cash collection needed
+                    $paymentStatus = 'Completed';
+                } elseif ($validated['payment_method'] === 'COD') {
+                    $paymentStatus = 'Pending'; // Collected on delivery
+                } elseif ($validated['payment_method'] === 'GCash') {
+                    $paymentStatus = 'Awaiting Verification';
+                    // Save GCash proof screenshot
+                    if ($request->hasFile('gcash_proof')) {
+                        $gcashProofPath = $request->file('gcash_proof')->store('gcash-proofs', 'public');
+                    }
+                    if (!empty($validated['gcash_reference'])) {
+                        $transactionId = 'REF-' . strtoupper($validated['gcash_reference']);
+                    }
+                }
+
                 Payment::create([
                     'order_id' => $order->id,
                     'payment_method' => $validated['payment_method'],
-                    'status' => $validated['payment_method'] === 'COD' ? 'Pending' : 'Completed',
-                    'amount' => $currentTotal,
+                    'status' => $paymentStatus,
+                    'amount' => $cashPaidForOrder,
                     'transaction_id' => $transactionId,
+                    'gcash_proof' => $gcashProofPath,
                 ]);
 
                 // 5. Initialize Delivery Record
@@ -177,11 +226,16 @@ class CheckoutController extends Controller
                 $createdOrderIds[] = $order->id;
             }
 
-            // 6. Give Loyalty Points based on total spend
-            $pointsGained = floor($finalTotalAmount / 100);
+            // 6. Update User Wallet
+            if ($totalCreditUsedInCheckout > 0) {
+                $user->decrement('store_credit', $totalCreditUsedInCheckout);
+            }
+
+            // 7. Loyalty Points based on Cash Spend
+            $totalCashPaid = $finalTotalAmount - $totalCreditUsedInCheckout;
+            $pointsGained = floor($totalCashPaid / 100);
             if ($pointsGained > 0) {
-                $user->loyalty_points += $pointsGained;
-                $user->save();
+                $user->increment('loyalty_points', $pointsGained);
 
                 $user->loyaltyPointsHistory()->create([
                     'points' => $pointsGained,
@@ -210,5 +264,13 @@ class CheckoutController extends Controller
                 'message' => $e->getMessage()
             ], 422);
         }
+    }
+
+    public function branches()
+    {
+        return response()->json([
+            'status' => 'success',
+            'data' => \App\Models\Branch::all()
+        ]);
     }
 }
